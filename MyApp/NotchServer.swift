@@ -4,28 +4,49 @@ import DynamicNotchKit
 
 // replace with puzzles later
 struct NotchContent: View {
-    private let position: ChessPosition
-    private let solverIsWhite: Bool
+    @ObservedObject var session: PuzzleSession
 
-    init() {
-        // Demo puzzle. In the real data, the first move belongs to the opponent,
-        // and the moves after it are the ones you have to find.
-        let fen = "6k1/5ppp/8/8/8/8/5PPP/R3K3 b - - 0 1"
-        let moves = ["g8h8", "a1a8"]
+    private var statusText: String {
+        switch session.status {
+        case .solving: return session.solverIsWhite ? "White to move" : "Black to move"
+        case .wrong: return "Not quite, try again"
+        case .solved: return "Solved ✓"
+        }
+    }
 
-        var pos = ChessPosition(fen: fen)
-        solverIsWhite = !pos.whiteToMove    // whoever is NOT moving first is the solver
-        pos.apply(uci: moves[0])            // play the opponent's move
-        position = pos
+    private var statusColor: Color {
+        switch session.status {
+        case .solving: return Color.secondary
+        case .wrong: return Color.red
+        case .solved: return Color.green
+        }
     }
 
     var body: some View {
         VStack(spacing: 8) {
-            Text(solverIsWhite ? "White to move" : "Black to move")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text(statusText)
+                    .font(.caption.bold())
+                    .foregroundStyle(statusColor)
+                Spacer()
+                Text("\(session.rating)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Button("Skip") { session.skip() }
+                    .buttonStyle(.plain)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 240)
 
-            ChessBoardView(position: position, flipped: !solverIsWhite, squareSize: 30)
+            ChessBoardView(
+                position: session.position,
+                flipped: !session.solverIsWhite,
+                squareSize: 30,
+                selected: session.selected,
+                wrongSquare: session.wrongSquare,
+                onTap: { session.tap($0) }
+            )
         }
         .padding(12)
     }
@@ -53,7 +74,7 @@ final class NotchController {
     private let triggerHalfWidth: CGFloat = 130    // how far left/right of center opens it
     private let triggerHeight: CGFloat = 30        // how far down from the top edge opens it
     private let keepOpenHalfWidth: CGFloat = 320   // while open, the area where it stays open
-    private let keepOpenHeight: CGFloat = 230
+    private let keepOpenHeight: CGFloat = 700
     private let collapseDelayMs = 100              // grace period before shrinking
 
     // ---- State ----
@@ -85,8 +106,9 @@ final class NotchController {
     }
 
     private func showCompact() async {
+        let session = PuzzleSession()
         let notch = DynamicNotch {
-            NotchContent()
+            NotchContent(session: session)
         } compactLeading: {
             PulsingDot()
         } compactTrailing: {

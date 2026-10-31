@@ -1,25 +1,44 @@
 import SwiftUI
 
-// A chess position: 64 squares, index 0 = a8, index 63 = h1
-struct ChessPosition {
-    var squares: [Character?]    // uppercase = white piece, lowercase = black piece
-    var whiteToMove: Bool
+// One piece on the board. The id stays the same as the piece moves,
+// which is what lets SwiftUI slide it instead of redrawing it.
+struct BoardPiece: Identifiable {
+    let id: Int
+    let kind: Character
+    let square: Int
+}
 
-    init(fen: String) {
+// A chess position: 64 squares, index 0 = a8, index 63 = h1 (the same order a FEN uses)
+struct ChessPosition {
+    var squares: [Character?]     // uppercase = white piece, lowercase = black piece
+    var ids: [Int?]               // a unique id for each piece, moving along with it
+    var whiteToMove: Bool
+    var lastMove: (from: Int, to: Int)?
+
+    init(fen: String, idBase: Int = 0) {
         let fields = fen.split(separator: " ")
-        var result: [Character?] = []
+        var parsed: [Character?] = []
 
         for ch in fields[0] {
             if ch == "/" { continue }
             if let emptyCount = ch.wholeNumberValue {
-                result.append(contentsOf: [Character?](repeating: nil, count: emptyCount))
+                parsed.append(contentsOf: [Character?](repeating: nil, count: emptyCount))
             } else {
-                result.append(ch)
+                parsed.append(ch)
             }
         }
 
-        squares = result
+        squares = parsed
+        ids = parsed.indices.map { i -> Int? in parsed[i] == nil ? nil : idBase + i }
         whiteToMove = fields.count > 1 ? (fields[1] == "w") : true
+        lastMove = nil
+    }
+
+    var boardPieces: [BoardPiece] {
+        squares.indices.compactMap { i in
+            guard let kind = squares[i], let id = ids[i] else { return nil }
+            return BoardPiece(id: id, kind: kind, square: i)
+        }
     }
 
     // Turns "e" and "4" into a square index
@@ -45,19 +64,20 @@ struct ChessPosition {
 
         // En passant: a pawn moving diagonally onto an empty square captures the pawn beside it
         if isPawn && fromCol != toCol && squares[to] == nil {
-            squares[(from / 8) * 8 + toCol] = nil
+            let captured = (from / 8) * 8 + toCol
+            squares[captured] = nil
+            ids[captured] = nil
         }
 
-        // Castling: the king moves two files, so the rook has to come along
+        // Castling: the king moves two files, so the rook comes along
         if isKing && abs(toCol - fromCol) == 2 {
             let row = from / 8
-            if toCol > fromCol {
-                squares[row * 8 + 5] = squares[row * 8 + 7]
-                squares[row * 8 + 7] = nil
-            } else {
-                squares[row * 8 + 3] = squares[row * 8 + 0]
-                squares[row * 8 + 0] = nil
-            }
+            let rookFrom = row * 8 + (toCol > fromCol ? 7 : 0)
+            let rookTo = row * 8 + (toCol > fromCol ? 5 : 3)
+            squares[rookTo] = squares[rookFrom]
+            ids[rookTo] = ids[rookFrom]
+            squares[rookFrom] = nil
+            ids[rookFrom] = nil
         }
 
         // Promotion
@@ -67,70 +87,95 @@ struct ChessPosition {
         }
 
         squares[to] = piece
+        ids[to] = ids[from]
         squares[from] = nil
+        ids[from] = nil
+        lastMove = (from, to)
     }
 }
 
-// One piece, drawn as a text symbol with an outline so it shows on both square colors
+// One piece, drawn from the SVG artwork in Assets.xcassets (wK, bQ, ...)
 struct PieceView: View {
     let piece: Character
     let size: CGFloat
 
-    private var glyph: String {
-        switch piece.lowercased() {
-        case "k": return "\u{265A}"
-        case "q": return "\u{265B}"
-        case "r": return "\u{265C}"
-        case "b": return "\u{265D}"
-        case "n": return "\u{265E}"
-        case "p": return "\u{265F}\u{FE0E}"   // the FE0E stops macOS from turning it into an emoji
-        default: return ""
-        }
+    private var assetName: String {
+        (piece.isUppercase ? "w" : "b") + piece.uppercased()
     }
 
     var body: some View {
-        let isWhite = piece.isUppercase
-        Text(glyph)
-            .font(.system(size: size * 0.8))
-            .foregroundStyle(isWhite ? Color.white : Color.black)
-            .shadow(color: isWhite ? .black : .white.opacity(0.7), radius: 0.8)
-            .shadow(color: isWhite ? .black : .white.opacity(0.7), radius: 0.8)
+        Image(assetName)
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
     }
 }
 
-// The 8x8 board
+// The 8x8 board: a layer of squares underneath, a layer of sliding pieces on top
 struct ChessBoardView: View {
     let position: ChessPosition
     let flipped: Bool          // true = black at the bottom
     let squareSize: CGFloat
+    var selected: Int? = nil
+    var wrongSquare: Int? = nil
+    var onTap: (Int) -> Void = { _ in }
 
     private let lightColor = Color(red: 0.93, green: 0.93, blue: 0.82)
     private let darkColor = Color(red: 0.46, green: 0.59, blue: 0.34)
 
+    // Where a square is drawn on screen (accounts for flipping)
+    private func displayCoords(_ square: Int) -> (col: Int, row: Int) {
+        let row = square / 8
+        let col = square % 8
+        return (flipped ? 7 - col : col, flipped ? 7 - row : row)
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            ForEach(0..<8, id: \.self) { displayRow in
-                HStack(spacing: 0) {
-                    ForEach(0..<8, id: \.self) { displayCol in
-                        let row = flipped ? 7 - displayRow : displayRow
-                        let col = flipped ? 7 - displayCol : displayCol
-                        squareView(row: row, col: col)
+        ZStack(alignment: .topLeading) {
+            // Layer 1: squares, highlights, and the tap targets
+            VStack(spacing: 0) {
+                ForEach(0..<8, id: \.self) { displayRow in
+                    HStack(spacing: 0) {
+                        ForEach(0..<8, id: \.self) { displayCol in
+                            let row = flipped ? 7 - displayRow : displayRow
+                            let col = flipped ? 7 - displayCol : displayCol
+                            squareView(row: row, col: col)
+                        }
                     }
                 }
             }
+
+            // Layer 2: pieces. When a piece's square changes inside withAnimation, it slides.
+            ForEach(position.boardPieces) { item in
+                let spot = displayCoords(item.square)
+                PieceView(piece: item.kind, size: squareSize)
+                    .offset(x: CGFloat(spot.col) * squareSize, y: CGFloat(spot.row) * squareSize)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)    // clicks fall through to the squares below
+            }
         }
+        .frame(width: squareSize * 8, height: squareSize * 8)
         .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     @ViewBuilder
     private func squareView(row: Int, col: Int) -> some View {
+        let index = row * 8 + col
         let isLight = (row + col) % 2 == 0
         ZStack {
             Rectangle().fill(isLight ? lightColor : darkColor)
-            if let piece = position.squares[row * 8 + col] {
-                PieceView(piece: piece, size: squareSize)
+            if let last = position.lastMove, index == last.from || index == last.to {
+                Rectangle().fill(Color.orange.opacity(0.3))
+            }
+            if index == selected {
+                Rectangle().fill(Color.yellow.opacity(0.5))
+            }
+            if index == wrongSquare {
+                Rectangle().fill(Color.red.opacity(0.6))
             }
         }
         .frame(width: squareSize, height: squareSize)
+        .contentShape(Rectangle())
+        .onTapGesture { onTap(index) }
     }
 }
