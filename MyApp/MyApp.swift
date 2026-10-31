@@ -3,8 +3,20 @@ import DynamicNotchKit
 
 @main
 struct MyApp: App {
+    private let server: LocalServer
+
+    init() {
+        let controller = NotchController()
+        server = LocalServer { path in
+            Task { @MainActor in
+                controller.handle(path)
+            }
+        }
+        server.start()
+    }
+
     var body: some Scene {
-        MenuBarExtra("WaitTime", systemImage: "hourglass") {
+        MenuBarExtra("MyApp", systemImage: "hourglass") {
             Button("Test notch") {
                 Task {
                     let notch = DynamicNotch {
