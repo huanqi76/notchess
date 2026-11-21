@@ -20,20 +20,20 @@
     },
   ],
   "files": [
-    { "kind": "folder", "path": "MyApp", "target-membership": [ "MyApp" ] },
+    { "kind": "folder", "path": "Notchess", "target-membership": [ "Notchess" ] },
     {
       "kind": "group",
       "name": "Products",
       "children": [
-        { "path": "<PRODUCTS>/MyApp.app", "id": "000000000000000000000120", "type": "wrapper.application", "index": false },
+        { "path": "<PRODUCTS>/Notchess.app", "id": "000000000000000000000120", "type": "wrapper.application", "index": false },
       ],
     },
   ],
   "targets": [
     {
-      "name": "MyApp",
+      "name": "Notchess",
       "id": "000000000000000100000000",
-      "product": "Products/MyApp.app",
+      "product": "Products/Notchess.app",
       "product-type": "application",
       "build-phases": [
         "compile-sources",

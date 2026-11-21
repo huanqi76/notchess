@@ -2,7 +2,7 @@ import SwiftUI
 import DynamicNotchKit
 
 @main
-struct MyApp: App {
+struct NotchessApp: App {
     private let server: LocalServer
 
     init() {
@@ -16,7 +16,7 @@ struct MyApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("MyApp", systemImage: "hourglass") {
+        MenuBarExtra("Notchess", systemImage: "hourglass") {
             Button("Test notch") {
                 Task {
                     let notch = DynamicNotch {
